@@ -4,7 +4,6 @@ alias-load-balancer: false
 append-user-to-subdomain: false
 append-user-to-subdomain-separator: '-'
 authentication: false
-authentication-keys-directory: deploy/pubkeys/
 banned-aliases: ""
 banned-countries: ""
 banned-ips: ""

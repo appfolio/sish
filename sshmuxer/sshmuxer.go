@@ -58,8 +58,6 @@ func Start() {
 		httpsPort = viper.GetInt("https-port-override")
 	}
 
-	utils.WatchCerts()
-
 	state := utils.NewState()
 	state.Console.State = state
 

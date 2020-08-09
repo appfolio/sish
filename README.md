@@ -27,7 +27,6 @@ not built by default and will require a retag from a maintainer to be built.
         --https-address=:443 \
         --https=true \
         --https-certificate-directory=/ssl \
-        --authentication-keys-directory=/pubkeys \
         --private-key-location=/keys/ssh_key \
         --bind-random-ports=false
       ```
@@ -144,23 +143,7 @@ ssh -J ssi.sh mylaptop
 
 ## Authentication
 
-If you want to use this service privately, it supports both public key and password
-authentication. To enable authentication, set `--authentication=true` as one of your CLI
-options and be sure to configure `--authentication-keys-directory` to your
-liking. The directory provided by `--authentication-keys-directory` is watched for changes and will reload
-the authorized keys automatically. The authorized cert index is regenerated on directory
-modification, so removed public keys will also automatically be removed. Files in this
-directory can either be single key per file, or multiple keys per file separated by newlines,
-similar to `authorized_keys`.
-
-One of my favorite ways of using this for authentication is like so:
-
-```bash
-sish@sish0:~/sish/pubkeys# curl https://github.com/antoniomika.keys > antoniomika
-```
-
-This will load my public keys from GitHub, place them in the directory that sish is watching,
-and then load the pubkey. As soon as this command is run, I can SSH normally and it will authorize me.
+We use LDAP to fetch public key for given user name then use it to authenticate.
 
 ## Custom domains
 
@@ -271,9 +254,6 @@ Flags:
       --append-user-to-subdomain                    Append the SSH user to the subdomain. This is useful in multitenant environments
       --append-user-to-subdomain-separator string   The token to use for separating username and subdomain selection in a virtualhost (default "-")
       --authentication                              Require authentication for the SSH service
-  -k, --authentication-keys-directory string        Directory where public keys for public key authentication are stored.
-                                                    sish will watch this directory and automatically load new keys and remove keys
-                                                    from the authentication list (default "deploy/pubkeys/")
       --banned-aliases string                       A comma separated list of banned aliases that users are unable to bind
   -o, --banned-countries string                     A comma separated list of banned countries. Applies to HTTP, TCP, and SSH connections
   -x, --banned-ips string                           A comma separated list of banned ips that are unable to access the service. Applies to HTTP, TCP, and SSH connections

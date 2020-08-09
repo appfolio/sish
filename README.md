@@ -146,13 +146,12 @@ ssh -J ssi.sh mylaptop
 
 If you want to use this service privately, it supports both public key and password
 authentication. To enable authentication, set `--authentication=true` as one of your CLI
-options and be sure to configure `--authentication-password` or `--authentication-keys-directory` to your
+options and be sure to configure `--authentication-keys-directory` to your
 liking. The directory provided by `--authentication-keys-directory` is watched for changes and will reload
 the authorized keys automatically. The authorized cert index is regenerated on directory
 modification, so removed public keys will also automatically be removed. Files in this
 directory can either be single key per file, or multiple keys per file separated by newlines,
-similar to `authorized_keys`. Password auth can be disabled by setting `--authentication-password=""` as a
-CLI option.
+similar to `authorized_keys`.
 
 One of my favorite ways of using this for authentication is like so:
 
@@ -275,7 +274,6 @@ Flags:
   -k, --authentication-keys-directory string        Directory where public keys for public key authentication are stored.
                                                     sish will watch this directory and automatically load new keys and remove keys
                                                     from the authentication list (default "deploy/pubkeys/")
-  -u, --authentication-password string              Password to use for ssh server password authentication (default "S3Cr3tP4$$W0rD")
       --banned-aliases string                       A comma separated list of banned aliases that users are unable to bind
   -o, --banned-countries string                     A comma separated list of banned countries. Applies to HTTP, TCP, and SSH connections
   -x, --banned-ips string                           A comma separated list of banned ips that are unable to access the service. Applies to HTTP, TCP, and SSH connections

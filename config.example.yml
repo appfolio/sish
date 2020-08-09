@@ -5,7 +5,6 @@ append-user-to-subdomain: false
 append-user-to-subdomain-separator: '-'
 authentication: false
 authentication-keys-directory: deploy/pubkeys/
-authentication-password: S3Cr3tP4$$W0rD
 banned-aliases: ""
 banned-countries: ""
 banned-ips: ""

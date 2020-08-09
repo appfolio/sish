@@ -304,15 +304,6 @@ func loadCerts() {
 func GetSSHConfig() *ssh.ServerConfig {
 	sshConfig := &ssh.ServerConfig{
 		NoClientAuth: !viper.GetBool("authentication"),
-		PasswordCallback: func(c ssh.ConnMetadata, password []byte) (*ssh.Permissions, error) {
-			log.Printf("Login attempt: %s, user %s", c.RemoteAddr(), c.User())
-
-			if string(password) == viper.GetString("authentication-password") && viper.GetString("authentication-password") != "" {
-				return nil, nil
-			}
-
-			return nil, fmt.Errorf("password doesn't match")
-		},
 		PublicKeyCallback: func(c ssh.ConnMetadata, key ssh.PublicKey) (*ssh.Permissions, error) {
 			log.Printf("Login attempt: %s, user %s key: %s", c.RemoteAddr(), c.User(), string(ssh.MarshalAuthorizedKey(key)))
 

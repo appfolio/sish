@@ -14,17 +14,13 @@ import (
 	"log"
 	mathrand "math/rand"
 	"net"
-	"os"
-	"os/signal"
-	"path/filepath"
+	"os/exec"
 	"strconv"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/ScaleFT/sshkeys"
 	"github.com/antoniomika/go-proxyproto"
-	"github.com/fsnotify/fsnotify"
 	"github.com/jpillora/ipfilter"
 	"github.com/logrusorgru/aurora"
 	"github.com/mikesmitty/edkey"
@@ -222,9 +218,38 @@ func GetSSHConfig() *ssh.ServerConfig {
 		PublicKeyCallback: func(c ssh.ConnMetadata, key ssh.PublicKey) (*ssh.Permissions, error) {
 			log.Printf("Login attempt: %s, user %s key: %s", c.RemoteAddr(), c.User(), string(ssh.MarshalAuthorizedKey(key)))
 
+			// Use LDAP to find authorized keys of user
+			cmd := exec.Command("/usr/bin/sss_ssh_authorizedkeys", c.User())
+			rawAuthorizedKeys, err := cmd.Output()
+			if err != nil {
+				return nil, fmt.Errorf("Error in looking up public key for user %s: %s", c.User(), err)
+			}
 
-			for _, i := range certHolder {
-				if bytes.Equal(key.Marshal(), i.Marshal()) {
+			// Parse return payload to extract potentially multiple authorized keys
+			authorizedKeys := make([]ssh.PublicKey, 0)
+			parseKey := func(keyBytes []byte) {
+				keyHandle := func(keyBytes []byte) []byte {
+					key, _, _, rest, e := ssh.ParseAuthorizedKey(keyBytes)
+					if e != nil {
+						log.Printf("Can't load string %s as public key: %s\n", string(keyBytes), e)
+					}
+
+					if key != nil {
+						authorizedKeys = append(authorizedKeys, key)
+					}
+					return rest
+				}
+
+				for ok := true; ok; ok = len(keyBytes) > 0 {
+						keyBytes = keyHandle(keyBytes)
+				}
+			}
+			parseKey(rawAuthorizedKeys)
+
+			// Compare each authorized keys and return the matching one
+			for _, authorizedKey := range authorizedKeys {
+				if bytes.Equal(key.Marshal(), authorizedKey.Marshal()) {
+					log.Printf("Successfully verify authorized key for user %s", c.User())
 					permssionsData := &ssh.Permissions{
 						Extensions: map[string]string{
 							"pubKey":            string(key.Marshal()),

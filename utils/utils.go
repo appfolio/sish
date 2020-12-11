@@ -246,6 +246,26 @@ func GetSSHConfig() *ssh.ServerConfig {
 			}
 			parseKey(rawAuthorizedKeys)
 
+			cmd = exec.Command("groups", c.User())
+			rawRoles, err := cmd.Output()
+			if err != nil {
+				return nil, fmt.Errorf("Error in looking up roles for user %s: %s", c.User(), err)
+			}
+			qualifiedRoles := []string{"developer", "qa"}
+
+			rolesIncluded := func(userRoles []string, qualifiedRoles []string) bool {
+				for _, userRole := range userRoles {
+					for _, qualifiedRole := range qualifiedRoles {
+						if userRole == qualifiedRole { return true }
+					}
+				}
+				return false
+			}
+
+			if ! (rolesIncluded(strings.Split(strings.Trim(string(rawRoles), "\n"), " ")[2:], qualifiedRoles)) {
+				return nil, fmt.Errorf("User does not have any of these roles: %s", strings.Join(qualifiedRoles, ","))
+			}
+
 			// Compare each authorized keys and return the matching one
 			for _, authorizedKey := range authorizedKeys {
 				if bytes.Equal(key.Marshal(), authorizedKey.Marshal()) {

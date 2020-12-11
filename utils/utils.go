@@ -14,17 +14,13 @@ import (
 	"log"
 	mathrand "math/rand"
 	"net"
-	"os"
-	"os/signal"
-	"path/filepath"
+	"os/exec"
 	"strconv"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/ScaleFT/sshkeys"
 	"github.com/antoniomika/go-proxyproto"
-	"github.com/fsnotify/fsnotify"
 	"github.com/jpillora/ipfilter"
 	"github.com/logrusorgru/aurora"
 	"github.com/mikesmitty/edkey"
@@ -40,12 +36,6 @@ const (
 var (
 	// Filter is the IPFilter used to block connections.
 	Filter *ipfilter.IPFilter
-
-	// certHolder is a slice of publickeys for auth.
-	certHolder = make([]ssh.PublicKey, 0)
-
-	// holderLock is the mutex used to update the certHolder slice.
-	holderLock = sync.Mutex{}
 
 	// bannedSubdomainList is a list of subdomains that cannot be bound.
 	bannedSubdomainList = []string{""}
@@ -220,106 +210,66 @@ func CheckPort(port uint32, portRanges string) (uint32, error) {
 	return 0, fmt.Errorf("not a safe port")
 }
 
-// WatchCerts watches ssh keys for changes and will load them.
-func WatchCerts() {
-	loadCerts()
-	watcher, err := fsnotify.NewWatcher()
-	if err != nil {
-		log.Fatal(err)
-	}
-
-	go func() {
-		c := make(chan os.Signal, 1)
-		signal.Notify(c, os.Interrupt)
-		go func() {
-			for range c {
-				watcher.Close()
-				os.Exit(0)
-			}
-		}()
-
-		for {
-			select {
-			case _, ok := <-watcher.Events:
-				if !ok {
-					return
-				}
-				loadCerts()
-			case _, ok := <-watcher.Errors:
-				if !ok {
-					return
-				}
-			}
-		}
-	}()
-
-	err = watcher.Add(viper.GetString("authentication-keys-directory"))
-	if err != nil {
-		log.Fatal(err)
-	}
-}
-
-// loadCerts loads public keys from the keys directory into a slice that is used
-// authenticating a user.
-func loadCerts() {
-	tmpCertHolder := make([]ssh.PublicKey, 0)
-
-	files, err := ioutil.ReadDir(viper.GetString("authentication-keys-directory"))
-	if err != nil {
-		log.Fatal(err)
-	}
-
-	parseKey := func(keyBytes []byte, fileInfo os.FileInfo) {
-		keyHandle := func(keyBytes []byte, fileInfo os.FileInfo) []byte {
-			key, _, _, rest, e := ssh.ParseAuthorizedKey(keyBytes)
-			if e != nil {
-				log.Printf("Can't load file %s as public key: %s\n", fileInfo.Name(), e)
-			}
-
-			if key != nil {
-				tmpCertHolder = append(tmpCertHolder, key)
-			}
-			return rest
-		}
-
-		for ok := true; ok; ok = len(keyBytes) > 0 {
-			keyBytes = keyHandle(keyBytes, fileInfo)
-		}
-	}
-
-	for _, f := range files {
-		i, e := ioutil.ReadFile(filepath.Join(viper.GetString("authentication-keys-directory"), f.Name()))
-		if e == nil && len(i) > 0 {
-			parseKey(i, f)
-		}
-	}
-
-	holderLock.Lock()
-	defer holderLock.Unlock()
-	certHolder = tmpCertHolder
-}
-
 // GetSSHConfig Returns an SSH config for the ssh muxer.
 // It handles auth and storing user connection information.
 func GetSSHConfig() *ssh.ServerConfig {
 	sshConfig := &ssh.ServerConfig{
 		NoClientAuth: !viper.GetBool("authentication"),
-		PasswordCallback: func(c ssh.ConnMetadata, password []byte) (*ssh.Permissions, error) {
-			log.Printf("Login attempt: %s, user %s", c.RemoteAddr(), c.User())
-
-			if string(password) == viper.GetString("authentication-password") && viper.GetString("authentication-password") != "" {
-				return nil, nil
-			}
-
-			return nil, fmt.Errorf("password doesn't match")
-		},
 		PublicKeyCallback: func(c ssh.ConnMetadata, key ssh.PublicKey) (*ssh.Permissions, error) {
 			log.Printf("Login attempt: %s, user %s key: %s", c.RemoteAddr(), c.User(), string(ssh.MarshalAuthorizedKey(key)))
 
-			holderLock.Lock()
-			defer holderLock.Unlock()
-			for _, i := range certHolder {
-				if bytes.Equal(key.Marshal(), i.Marshal()) {
+			// Use LDAP to find authorized keys of user
+			cmd := exec.Command("/usr/bin/sss_ssh_authorizedkeys", c.User())
+			rawAuthorizedKeys, err := cmd.Output()
+			if err != nil {
+				return nil, fmt.Errorf("Error in looking up public key for user %s: %s", c.User(), err)
+			}
+
+			// Parse return payload to extract potentially multiple authorized keys
+			authorizedKeys := make([]ssh.PublicKey, 0)
+			parseKey := func(keyBytes []byte) {
+				keyHandle := func(keyBytes []byte) []byte {
+					key, _, _, rest, e := ssh.ParseAuthorizedKey(keyBytes)
+					if e != nil {
+						log.Printf("Can't load string %s as public key: %s\n", string(keyBytes), e)
+					}
+
+					if key != nil {
+						authorizedKeys = append(authorizedKeys, key)
+					}
+					return rest
+				}
+
+				for ok := true; ok; ok = len(keyBytes) > 0 {
+						keyBytes = keyHandle(keyBytes)
+				}
+			}
+			parseKey(rawAuthorizedKeys)
+
+			cmd = exec.Command("groups", c.User())
+			rawRoles, err := cmd.Output()
+			if err != nil {
+				return nil, fmt.Errorf("Error in looking up roles for user %s: %s", c.User(), err)
+			}
+			qualifiedRoles := []string{"developer", "qa"}
+
+			rolesIncluded := func(userRoles []string, qualifiedRoles []string) bool {
+				for _, userRole := range userRoles {
+					for _, qualifiedRole := range qualifiedRoles {
+						if userRole == qualifiedRole { return true }
+					}
+				}
+				return false
+			}
+
+			if ! (rolesIncluded(strings.Split(strings.Trim(string(rawRoles), "\n"), " ")[2:], qualifiedRoles)) {
+				return nil, fmt.Errorf("User does not have any of these roles: %s", strings.Join(qualifiedRoles, ","))
+			}
+
+			// Compare each authorized keys and return the matching one
+			for _, authorizedKey := range authorizedKeys {
+				if bytes.Equal(key.Marshal(), authorizedKey.Marshal()) {
+					log.Printf("Successfully verify authorized key for user %s", c.User())
 					permssionsData := &ssh.Permissions{
 						Extensions: map[string]string{
 							"pubKey":            string(key.Marshal()),
